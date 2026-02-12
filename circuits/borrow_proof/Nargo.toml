@@ -1,0 +1,8 @@
+[package]
+name = "borrow_proof"
+type = "bin"
+authors = ["VestaZk Team"]
+compiler_version = ">=1.0.0-beta.1"
+
+[dependencies]
+noir_stdlib = { tag = "v1.0.0-beta.1", git = "https://github.com/noir-lang/noir" }
