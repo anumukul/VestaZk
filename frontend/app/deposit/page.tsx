@@ -29,24 +29,14 @@ export default function DepositPage() {
     setStatus("Processing deposit...");
 
     try {
-      // Convert amount to WBTC (8 decimals)
       const amountBigInt = BigInt(Math.floor(parseFloat(amount) * 100000000));
-
-      // Create vault client
       const vaultClient = new VaultClient(account);
 
-      // Call deposit function
-      const commitmentHash = await vaultClient.deposit(amountBigInt);
+      const { commitment: commitmentHash, leafIndex, salt } = await vaultClient.deposit(amountBigInt);
 
-      // Generate salt and merkle path (simplified - in production, this would come from contract events)
-      const salt = generateSalt();
-      const merklePath: string[] = [];
-      const merkleIndices: number[] = [];
-
-      // Get merkle root from contract
+      const { path: merklePath, indices: merkleIndices } = await vaultClient.getMerkleProof(leafIndex);
       const merkleRoot = await vaultClient.getMerkleRoot();
 
-      // Save commitment data to localStorage
       saveCommitmentData(address, {
         btcAmount: amountBigInt.toString(),
         salt,
@@ -64,15 +54,6 @@ export default function DepositPage() {
     } finally {
       setIsProcessing(false);
     }
-  }
-
-  function generateSalt(): string {
-    // Generate random salt
-    const randomBytes = new Uint8Array(32);
-    crypto.getRandomValues(randomBytes);
-    return Array.from(randomBytes)
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
   }
 
   return (

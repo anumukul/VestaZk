@@ -7,8 +7,22 @@ const VAULT_ABI = [
     type: "function",
     name: "deposit",
     inputs: [{ name: "amount", type: "u256" }],
-    outputs: [{ name: "commitment", type: "felt252" }],
+    outputs: [
+      { name: "commitment", type: "felt252" },
+      { name: "leaf_index", type: "u64" },
+      { name: "salt", type: "felt252" },
+    ],
     state_mutability: "external",
+  },
+  {
+    type: "function",
+    name: "get_merkle_proof",
+    inputs: [{ name: "leaf_index", type: "u64" }],
+    outputs: [
+      { name: "path", type: "Array<felt252>" },
+      { name: "indices", type: "Array<u64>" },
+    ],
+    state_mutability: "view",
   },
   {
     type: "function",
@@ -69,7 +83,7 @@ export class VaultClient {
     }
   }
 
-  async deposit(amount: bigint): Promise<string> {
+  async deposit(amount: bigint): Promise<{ commitment: string; leafIndex: number; salt: string }> {
     try {
       if (!this.contract.account) {
         throw new Error("Account required for deposit");
@@ -78,14 +92,21 @@ export class VaultClient {
       const tx = await this.contract.deposit(amount);
       await this.provider.waitForTransaction(tx.transaction_hash);
 
-      // Parse commitment from events
       const receipt = await this.provider.getTransactionReceipt(tx.transaction_hash);
-      const commitment = this.parseCommitmentFromReceipt(receipt);
+      const { commitment, leafIndex, salt } = this.parseDepositReceipt(receipt);
 
-      return commitment;
-    } catch (error: any) {
-      throw new Error(`Deposit failed: ${error.message}`);
+      return { commitment, leafIndex, salt };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Deposit failed: ${message}`);
     }
+  }
+
+  async getMerkleProof(leafIndex: number): Promise<{ path: string[]; indices: number[] }> {
+    const result = await this.contract.get_merkle_proof(leafIndex);
+    const path = (result[0] as bigint[]).map((p) => p.toString());
+    const indices = (result[1] as bigint[]).map((i) => Number(i));
+    return { path, indices };
   }
 
   async borrow(
@@ -153,12 +174,19 @@ export class VaultClient {
     return felts;
   }
 
-  private parseCommitmentFromReceipt(receipt: any): string {
-    // Parse DepositEvent from transaction receipt
-    const event = receipt.events?.find((e: any) =>
+  private parseDepositReceipt(receipt: {
+    events?: Array< { keys?: unknown[]; data?: unknown[] } >;
+  }): { commitment: string; leafIndex: number; salt: string } {
+    const event = receipt.events?.find((e) =>
       e.keys?.[0]?.toString().includes("Deposit")
     );
-    if (!event) throw new Error("Commitment not found in receipt");
-    return event.data[0].toString(); // First data field is commitment
+    if (!event?.data || event.data.length < 4) {
+      throw new Error("Deposit event not found in receipt");
+    }
+    return {
+      commitment: event.data[1].toString(),
+      leafIndex: Number(event.data[2]),
+      salt: event.data[3].toString(),
+    };
   }
 }

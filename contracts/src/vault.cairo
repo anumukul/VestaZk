@@ -3,8 +3,7 @@ use starknet::get_caller_address;
 use starknet::get_contract_address;
 use starknet::get_block_timestamp;
 
-mod interfaces;
-use interfaces::{IERC20Dispatcher, IERC20DispatcherTrait, IVesuPoolDispatcher, IVesuPoolDispatcherTrait, IVerifierDispatcher, IVerifierDispatcherTrait, IPragmaOracleDispatcher, IPragmaOracleDispatcherTrait};
+use vestazk_vault::interfaces::{IERC20Dispatcher, IERC20DispatcherTrait, IVesuPoolDispatcher, IVesuPoolDispatcherTrait, IVerifierDispatcher, IVerifierDispatcherTrait, IPragmaOracleDispatcher, IPragmaOracleDispatcherTrait};
 
 const TREE_DEPTH: u32 = 20;
 
@@ -13,7 +12,7 @@ const TREE_DEPTH: u32 = 20;
 mod Vault {
     use starknet::{ContractAddress, get_caller_address, get_contract_address, get_block_timestamp};
     
-    use super::interfaces::{IERC20Dispatcher, IERC20DispatcherTrait, IVesuPoolDispatcher, IVesuPoolDispatcherTrait, IVerifierDispatcher, IVerifierDispatcherTrait, IPragmaOracleDispatcher, IPragmaOracleDispatcherTrait};
+    use vestazk_vault::interfaces::{IERC20Dispatcher, IERC20DispatcherTrait, IVesuPoolDispatcher, IVesuPoolDispatcherTrait, IVerifierDispatcher, IVerifierDispatcherTrait, IPragmaOracleDispatcher, IPragmaOracleDispatcherTrait};
 
     #[storage]
     struct Storage {
@@ -45,6 +44,7 @@ mod Vault {
         // Security
         paused: bool,
         owner: ContractAddress,
+        reentrancy_lock: bool,
     }
 
     #[event]
@@ -61,6 +61,8 @@ mod Vault {
     struct Deposit {
         user: ContractAddress,
         commitment: felt252,
+        leaf_index: u64,
+        salt: felt252,
         amount: u256,
         timestamp: u64,
     }
@@ -127,75 +129,87 @@ mod Vault {
         
         // Set buffer to 120% (vault maintains 120% aggregate health)
         self.buffer_percentage.write(120);
-        
+
         self.paused.write(false);
+        self.reentrancy_lock.write(false);
+    }
+
+    fn reentrancy_guard_start(ref self: ContractState) {
+        assert(!self.reentrancy_lock.read(), "ReentrancyGuard: reentrant call");
+        self.reentrancy_lock.write(true);
+    }
+
+    fn reentrancy_guard_end(ref self: ContractState) {
+        self.reentrancy_lock.write(false);
     }
 
     /// Deposit WBTC and receive a privacy-preserving commitment
-    /// 
+    ///
     /// # Arguments
     /// * `amount` - Amount of WBTC to deposit (8 decimals)
     ///
     /// # Returns
-    /// * `felt252` - Commitment hash for the deposit
+    /// * `(felt252, u64, felt252)` - Commitment hash, leaf index, and salt (for client proof generation)
     ///
     /// # Panics
     /// * If amount is zero
     /// * If WBTC transfer fails
     /// * If contract is paused
     #[external(v0)]
-    fn deposit(ref self: ContractState, amount: u256) -> felt252 {
+    fn deposit(ref self: ContractState, amount: u256) -> (felt252, u64) {
         self.assert_not_paused();
         assert(amount > 0, "Amount must be positive");
-        
+
         let caller = get_caller_address();
-        
+
         // Transfer WBTC from user to vault
         let wbtc = IERC20Dispatcher { contract_address: self.wbtc_address.read() };
         wbtc.transfer_from(caller, get_contract_address(), amount);
-        
+
         // Approve Vesu pool to spend WBTC
         wbtc.approve(self.vesu_pool_address.read(), amount);
-        
+
         // Supply WBTC to Vesu pool
         let vesu_pool = IVesuPoolDispatcher { contract_address: self.vesu_pool_address.read() };
         vesu_pool.supply(self.wbtc_address.read(), amount);
-        
+
         // Generate commitment = Hash(owner, amount, salt)
-        // Salt is generated from block timestamp and caller address
         let salt = generate_salt(caller);
         let commitment = generate_commitment(caller, amount, salt);
-        
-        // Insert commitment into Merkle tree
-        let new_root = self.merkle_insert(commitment);
+
+        // Insert commitment into Merkle tree; get new root and leaf index
+        let (new_root, leaf_index) = self.merkle_insert(commitment);
         self.merkle_root.write(new_root);
-        
+
         // Update state
         self.total_deposited.write(self.total_deposited.read() + amount);
         self.commitment_count.write(self.commitment_count.read() + 1);
-        
+
         // Emit event
         self.emit(Deposit {
             user: caller,
             commitment,
+            leaf_index,
+            salt,
             amount,
             timestamp: get_block_timestamp()
         });
-        
-        commitment
+
+        self.reentrancy_guard_end();
+        (commitment, leaf_index, salt)
     }
 
-    /// Insert a leaf into the Merkle tree and return new root
-    fn merkle_insert(ref self: ContractState, leaf: felt252) -> felt252 {
+    /// Insert a leaf into the Merkle tree and return (new root, leaf index).
+    fn merkle_insert(ref self: ContractState, leaf: felt252) -> (felt252, u64) {
         let index = self.merkle_next_index.read();
-        
+
         // Store leaf at level 0
         self.merkle_levels.write((0, index), leaf);
-        
+
         // Compute path up to root
         let mut current_hash = leaf;
         let mut current_index = index;
-        
+
         for level in 0..TREE_DEPTH {
             let is_right = current_index % 2 == 1;
             let sibling_index = if is_right {
@@ -203,25 +217,25 @@ mod Vault {
             } else {
                 current_index + 1
             };
-            
+
             let sibling = self.merkle_levels.read((level, sibling_index));
             let zero_val = self.merkle_zero_values.read(level);
             let sibling_hash = if sibling == 0 { zero_val } else { sibling };
-            
+
             // Compute parent hash
             current_hash = if is_right {
                 poseidon_hash_2(sibling_hash, current_hash)
             } else {
                 poseidon_hash_2(current_hash, sibling_hash)
             };
-            
+
             // Move to parent level
             current_index = current_index / 2;
             self.merkle_levels.write((level + 1, current_index), current_hash);
         }
-        
+
         self.merkle_next_index.write(index + 1);
-        current_hash
+        (current_hash, index)
     }
 
     /// Generate commitment hash from user address, amount, and salt
@@ -250,6 +264,40 @@ mod Vault {
     #[view]
     fn get_merkle_root(self: @ContractState) -> felt252 {
         self.merkle_root.read()
+    }
+
+    /// Get Merkle proof for a leaf index (path hashes and sibling positions 0=left, 1=right).
+    #[view]
+    fn get_merkle_proof(self: @ContractState, leaf_index: u64) -> (Array<felt252>, Array<u64>) {
+        let mut path = ArrayTrait::new();
+        let mut indices = ArrayTrait::new();
+        let mut current_index = leaf_index;
+
+        for level in 0..TREE_DEPTH {
+            let sibling_index = if current_index % 2 == 0 {
+                current_index + 1
+            } else {
+                current_index - 1
+            };
+
+            let sibling = self.merkle_levels.read((level, sibling_index));
+            let zero_val = self.merkle_zero_values.read(level);
+            let sibling_hash = if sibling == 0 { zero_val } else { sibling };
+            path.append(sibling_hash);
+
+            // 0 = current is left, 1 = current is right
+            indices.append(current_index % 2);
+
+            current_index = current_index / 2;
+        }
+
+        (path, indices)
+    }
+
+    /// Get next leaf index (number of leaves inserted so far).
+    #[view]
+    fn get_merkle_next_index(self: @ContractState) -> u64 {
+        self.merkle_next_index.read()
     }
 
     /// Get total deposited amount
@@ -329,6 +377,7 @@ mod Vault {
         public_inputs: BorrowPublicInputs,
         recipient: ContractAddress
     ) -> bool {
+        self.reentrancy_guard_start();
         self.assert_not_paused();
         
         // Verify proof
@@ -383,7 +432,8 @@ mod Vault {
             recipient,
             timestamp: get_block_timestamp()
         });
-        
+
+        self.reentrancy_guard_end();
         true
     }
 
@@ -445,7 +495,6 @@ mod Vault {
         ];
         serialized.span()
     }
-}
 
     /// Emergency exit for healthy positions
     /// Allows users with health factor > 150 (1.5x) to exit
@@ -456,8 +505,9 @@ mod Vault {
         proof: Span<felt252>,
         public_inputs: ExitPublicInputs
     ) -> bool {
+        self.reentrancy_guard_start();
         self.assert_not_paused();
-        
+
         // Verify proof shows health_factor > 150
         let verifier = IVerifierDispatcher { contract_address: self.verifier_address.read() };
         let public_inputs_span = self.serialize_exit_public_inputs(public_inputs);
@@ -506,7 +556,8 @@ mod Vault {
             fee: exit_fee,
             timestamp: get_block_timestamp()
         });
-        
+
+        self.reentrancy_guard_end();
         true
     }
 

@@ -2,21 +2,27 @@ import { UltraHonkBackend } from "@noir-lang/backend_barretenberg";
 import { Noir } from "@noir-lang/noir_js";
 import { ProofInputs, GeneratedProof } from "./types";
 
-// Circuit will be loaded from compiled artifact
-// For now, this is a placeholder structure
-let circuit: any = null;
+const CIRCUIT_URL = "/circuits/borrow_proof.json";
+let circuitCache: unknown | null = null;
 
-export async function loadCircuit() {
-  if (circuit) return circuit;
-  
+/**
+ * Load the compiled Noir circuit from public/circuits/borrow_proof.json.
+ * Copy the artifact from circuits/borrow_proof/target/ after running nargo compile.
+ */
+export async function loadCircuit(): Promise<unknown | null> {
+  if (circuitCache) return circuitCache;
+
   try {
-    // Load compiled circuit JSON
-    // In production, this would be: import circuit from '@/public/circuits/borrow_proof.json';
-    // For now, return null to indicate circuit needs to be compiled
+    const res = await fetch(CIRCUIT_URL);
+    if (!res.ok) {
+      if (res.status === 404) return null;
+      throw new Error(`HTTP ${res.status}`);
+    }
+    circuitCache = (await res.json()) as unknown;
+    return circuitCache;
+  } catch (e) {
+    console.warn("Circuit not loaded:", e);
     return null;
-  } catch (error) {
-    console.error("Failed to load circuit:", error);
-    throw new Error("Circuit not available. Please compile the Noir circuit first.");
   }
 }
 
@@ -68,9 +74,10 @@ export async function generateBorrowProof(
       proof: proof.proof,
       publicInputs: circuitInputs.public_inputs,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
     console.error("Proof generation failed:", error);
-    throw new Error(`Failed to generate proof: ${error.message}`);
+    throw new Error(`Failed to generate proof: ${message}`);
   }
 }
 

@@ -1,4 +1,4 @@
-use dep::std;
+use dep::poseidon::poseidon::bn254;
 
 // Constants
 global TREE_DEPTH: u32 = 20;
@@ -21,6 +21,7 @@ struct PrivateInputs {
     salt: Field,
     merkle_path: [Field; TREE_DEPTH],
     merkle_indices: [u1; TREE_DEPTH],  // 0 = left, 1 = right
+    debt_inverse: Field,  // witness: 1/debt_value_usd (prover supplies; proves debt != 0)
 }
 
 fn main(
@@ -53,19 +54,18 @@ fn main(
     let debt_value_usd = public_inputs.borrow_amount * public_inputs.usdc_price;
     
     // Step 4: Calculate health factor (collateral / debt * 100)
-    // health_factor = (collateral_usd / debt_usd) * 100
-    // E.g., 2 BTC * $65k = $130k collateral, $100k debt = 130% = 130
-    assert(debt_value_usd > 0, "Debt cannot be zero");
+    // Debt must be non-zero: prover supplies inverse and we verify debt * debt_inverse == 1
+    assert(
+        debt_value_usd * private_inputs.debt_inverse == 1,
+        "Debt cannot be zero"
+    );
     
     // To avoid division, we check: collateral_usd * 100 >= debt_usd * min_health_factor
-    // This is equivalent to: health_factor >= min_health_factor
+    // Prove A >= B by showing (A - B) fits in 128 bits (so no wrap = non-negative)
     let min_collateral_required = debt_value_usd * public_inputs.min_health_factor;
     let collateral_times_100 = collateral_value_usd * HEALTH_FACTOR_DECIMALS;
-    
-    assert(
-        collateral_times_100 >= min_collateral_required,
-        "Health factor too low"
-    );
+    let diff = collateral_times_100 - min_collateral_required;
+    diff.assert_max_bit_size::<128>();
     
     // Step 5: Verify nullifier is unique (generated from commitment + borrow_amount)
     let expected_nullifier = compute_nullifier(commitment, public_inputs.borrow_amount);
@@ -79,13 +79,13 @@ fn compute_commitment(
     salt: Field
 ) -> Field {
     // Hash owner and amount first
-    let owner_amount_hash = std::hash::poseidon::bn254::hash_2([
+    let owner_amount_hash = bn254::hash_2([
         owner_address,
         btc_amount
     ]);
     
     // Then hash with salt
-    std::hash::poseidon::bn254::hash_2([
+    bn254::hash_2([
         owner_amount_hash,
         salt
     ])
@@ -105,10 +105,10 @@ fn verify_merkle_proof(
         
         if is_right == 0 {
             // Current is left child
-            current = std::hash::poseidon::bn254::hash_2([current, sibling]);
+            current = bn254::hash_2([current, sibling]);
         } else {
             // Current is right child
-            current = std::hash::poseidon::bn254::hash_2([sibling, current]);
+            current = bn254::hash_2([sibling, current]);
         }
     }
     
@@ -117,7 +117,7 @@ fn verify_merkle_proof(
 
 /// Compute nullifier from commitment and borrow amount
 fn compute_nullifier(commitment: Field, borrow_amount: Field) -> Field {
-    std::hash::poseidon::bn254::hash_2([commitment, borrow_amount])
+    bn254::hash_2([commitment, borrow_amount])
 }
 
 #[test]
@@ -142,6 +142,8 @@ fn test_borrow_proof_valid() {
     
     // Compute nullifier
     let nullifier = compute_nullifier(commitment, borrow_amount);
+    let debt_value_usd = borrow_amount * usdc_price;
+    let debt_inverse = 1 / debt_value_usd;
     
     let public_inputs = PublicInputs {
         merkle_root: root,
@@ -158,6 +160,7 @@ fn test_borrow_proof_valid() {
         salt,
         merkle_path,
         merkle_indices,
+        debt_inverse,
     };
     
     // This should pass: 1 BTC ($65k) collateral, $50k debt = 130% health
@@ -179,6 +182,8 @@ fn test_borrow_proof_low_health() {
     let mut merkle_indices = [0; TREE_DEPTH];
     let root = verify_merkle_proof(commitment, merkle_path, merkle_indices);
     let nullifier = compute_nullifier(commitment, borrow_amount);
+    let debt_value_usd = borrow_amount * usdc_price;
+    let debt_inverse = 1 / debt_value_usd;
     
     let public_inputs = PublicInputs {
         merkle_root: root,
@@ -189,12 +194,13 @@ fn test_borrow_proof_low_health() {
         nullifier,
     };
     
-    let private_inputs = PrivateInputs {
+    let _private_inputs = PrivateInputs {
         owner_address: owner,
         btc_amount,
         salt,
         merkle_path,
         merkle_indices,
+        debt_inverse,
     };
     
     // This should fail: 1 BTC ($65k) collateral, $100k debt = 65% health < 110%
