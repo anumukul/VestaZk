@@ -7,12 +7,34 @@ use vestazk_vault::interfaces::{IERC20Dispatcher, IERC20DispatcherTrait, IVesuPo
 
 const TREE_DEPTH: u32 = 20;
 
+/// Public inputs for borrow proof.
+#[derive(Drop, Serde, starknet::Store)]
+pub struct BorrowPublicInputs {
+    pub merkle_root: felt252,
+    pub borrow_amount: u256,
+    pub btc_price: u256,
+    pub usdc_price: u256,
+    pub min_health_factor: u256,
+    pub nullifier: felt252,
+}
+
+/// Public inputs for exit proof.
+#[derive(Drop, Serde, starknet::Store)]
+pub struct ExitPublicInputs {
+    pub merkle_root: felt252,
+    pub commitment: felt252,
+    pub user_deposit: u256,
+    pub health_factor: u256,
+}
+
 /// Main Vault contract for privacy-preserving lending
 #[starknet::contract]
 mod Vault {
     use starknet::{ContractAddress, get_caller_address, get_contract_address, get_block_timestamp};
-    
+    use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
+
     use vestazk_vault::interfaces::{IERC20Dispatcher, IERC20DispatcherTrait, IVesuPoolDispatcher, IVesuPoolDispatcherTrait, IVerifierDispatcher, IVerifierDispatcherTrait, IPragmaOracleDispatcher, IPragmaOracleDispatcherTrait};
+    use super::{BorrowPublicInputs, ExitPublicInputs};
 
     #[storage]
     struct Storage {
@@ -135,7 +157,7 @@ mod Vault {
     }
 
     fn reentrancy_guard_start(ref self: ContractState) {
-        assert(!self.reentrancy_lock.read(), "ReentrancyGuard: reentrant call");
+        assert(!self.reentrancy_lock.read(), 'ReentrancyGuard: reentrant call');
         self.reentrancy_lock.write(true);
     }
 
@@ -143,22 +165,39 @@ mod Vault {
         self.reentrancy_lock.write(false);
     }
 
-    /// Deposit WBTC and receive a privacy-preserving commitment
-    ///
-    /// # Arguments
-    /// * `amount` - Amount of WBTC to deposit (8 decimals)
-    ///
-    /// # Returns
-    /// * `(felt252, u64, felt252)` - Commitment hash, leaf index, and salt (for client proof generation)
-    ///
-    /// # Panics
-    /// * If amount is zero
-    /// * If WBTC transfer fails
-    /// * If contract is paused
-    #[external(v0)]
-    fn deposit(ref self: ContractState, amount: u256) -> (felt252, u64) {
+    #[starknet::interface]
+    trait IVault<TContractState> {
+        fn deposit(ref self: TContractState, amount: u256) -> (felt252, u64, felt252);
+        fn get_merkle_root(self: @TContractState) -> felt252;
+        fn get_merkle_proof(self: @TContractState, leaf_index: u64) -> (Array<felt252>, Array<u64>);
+        fn get_merkle_next_index(self: @TContractState) -> u64;
+        fn get_total_deposited(self: @TContractState) -> u256;
+        fn get_total_borrowed(self: @TContractState) -> u256;
+        fn get_commitment_count(self: @TContractState) -> u64;
+        fn pause(ref self: TContractState);
+        fn resume(ref self: TContractState);
+        fn set_min_health_factor(ref self: TContractState, new_min: u256);
+        fn set_buffer_percentage(ref self: TContractState, new_buffer: u256);
+        fn borrow(
+            ref self: TContractState,
+            proof: Span<felt252>,
+            public_inputs: BorrowPublicInputs,
+            recipient: ContractAddress
+        ) -> bool;
+        fn get_aggregate_health_factor(self: @TContractState) -> (u256, u256, u256);
+        fn emergency_exit(
+            ref self: TContractState,
+            proof: Span<felt252>,
+            public_inputs: ExitPublicInputs
+        ) -> bool;
+    }
+
+    #[abi(embed_v0)]
+    impl VaultImpl of IVault<ContractState> {
+        /// Deposit WBTC and receive a privacy-preserving commitment
+        fn deposit(ref self: ContractState, amount: u256) -> (felt252, u64, felt252) {
         self.assert_not_paused();
-        assert(amount > 0, "Amount must be positive");
+        assert(amount > 0, 'Amount must be positive');
 
         let caller = get_caller_address();
 
@@ -197,6 +236,154 @@ mod Vault {
 
         self.reentrancy_guard_end();
         (commitment, leaf_index, salt)
+        }
+
+        fn get_merkle_root(self: @ContractState) -> felt252 {
+            self.merkle_root.read()
+        }
+
+        fn get_merkle_proof(self: @ContractState, leaf_index: u64) -> (Array<felt252>, Array<u64>) {
+            let mut path = ArrayTrait::new();
+            let mut indices = ArrayTrait::new();
+            let mut current_index = leaf_index;
+            for level in 0..TREE_DEPTH {
+                let sibling_index = if current_index % 2 == 0 { current_index + 1 } else { current_index - 1 };
+                let sibling = self.merkle_levels.read((level, sibling_index));
+                let zero_val = self.merkle_zero_values.read(level);
+                let sibling_hash = if sibling == 0 { zero_val } else { sibling };
+                path.append(sibling_hash);
+                indices.append(current_index % 2);
+                current_index = current_index / 2;
+            }
+            (path, indices)
+        }
+
+        fn get_merkle_next_index(self: @ContractState) -> u64 {
+            self.merkle_next_index.read()
+        }
+
+        fn get_total_deposited(self: @ContractState) -> u256 {
+            self.total_deposited.read()
+        }
+
+        fn get_total_borrowed(self: @ContractState) -> u256 {
+            self.total_borrowed.read()
+        }
+
+        fn get_commitment_count(self: @ContractState) -> u64 {
+            self.commitment_count.read()
+        }
+
+        fn pause(ref self: ContractState) {
+            self.assert_only_owner();
+            self.paused.write(true);
+            self.emit(Paused { account: get_caller_address() });
+        }
+
+        fn resume(ref self: ContractState) {
+            self.assert_only_owner();
+            self.paused.write(false);
+            self.emit(Unpaused { account: get_caller_address() });
+        }
+
+        fn set_min_health_factor(ref self: ContractState, new_min: u256) {
+            self.assert_only_owner();
+            assert(new_min >= 100, 'Health factor must be at least 100');
+            self.min_health_factor.write(new_min);
+        }
+
+        fn set_buffer_percentage(ref self: ContractState, new_buffer: u256) {
+            self.assert_only_owner();
+            assert(new_buffer >= 100, 'Buffer must be at least 100');
+            self.buffer_percentage.write(new_buffer);
+        }
+
+        fn borrow(
+            ref self: ContractState,
+            proof: Span<felt252>,
+            public_inputs: BorrowPublicInputs,
+            recipient: ContractAddress
+        ) -> bool {
+            self.reentrancy_guard_start();
+            self.assert_not_paused();
+            let verifier = IVerifierDispatcher { contract_address: self.verifier_address.read() };
+            let public_inputs_span = self.serialize_public_inputs(public_inputs);
+            let valid = verifier.verify_proof(proof, public_inputs_span);
+            assert(valid, 'Invalid proof');
+            assert(public_inputs.merkle_root == self.merkle_root.read(), 'Stale proof: merkle root mismatch');
+            assert(!self.nullifiers.read(public_inputs.nullifier), 'Nullifier already used');
+            self.nullifiers.write(public_inputs.nullifier, true);
+            let (collateral_usd, debt_usd, _) = self.get_aggregate_health_factor();
+            let new_debt = debt_usd + public_inputs.borrow_amount;
+            assert(new_debt > 0, 'Debt cannot be zero');
+            let new_health = (collateral_usd * 100) / new_debt;
+            let min_required = (self.min_health_factor.read() * self.buffer_percentage.read()) / 100;
+            assert(new_health >= min_required, 'Health factor too low after borrow');
+            let vesu_pool = IVesuPoolDispatcher { contract_address: self.vesu_pool_address.read() };
+            vesu_pool.borrow(self.usdc_address.read(), public_inputs.borrow_amount);
+            let usdc = IERC20Dispatcher { contract_address: self.usdc_address.read() };
+            usdc.transfer(recipient, public_inputs.borrow_amount);
+            self.total_borrowed.write(self.total_borrowed.read() + public_inputs.borrow_amount);
+            self.emit(Borrow {
+                user: get_caller_address(),
+                nullifier: public_inputs.nullifier,
+                borrow_amount: public_inputs.borrow_amount,
+                recipient,
+                timestamp: get_block_timestamp()
+            });
+            self.reentrancy_guard_end();
+            true
+        }
+
+        fn get_aggregate_health_factor(self: @ContractState) -> (u256, u256, u256) {
+            let vesu_pool = IVesuPoolDispatcher { contract_address: self.vesu_pool_address.read() };
+            let collateral_btc = vesu_pool.get_total_collateral(self.wbtc_address.read());
+            let debt_usdc = vesu_pool.get_total_debt(self.usdc_address.read());
+            let oracle = IPragmaOracleDispatcher { contract_address: self.oracle_address.read() };
+            let btc_price_response = oracle.get_data_median(0x4254432f555344);
+            let btc_price = btc_price_response.price;
+            let usdc_price = 1000000_u256;
+            let collateral_usd = (collateral_btc * btc_price) / 100000000;
+            let debt_usd = (debt_usdc * usdc_price) / 1000000;
+            let health_factor = if debt_usd > 0 { (collateral_usd * 100) / debt_usd } else { 0 };
+            (collateral_usd, debt_usd, health_factor)
+        }
+
+        fn emergency_exit(
+            ref self: ContractState,
+            proof: Span<felt252>,
+            public_inputs: ExitPublicInputs
+        ) -> bool {
+            self.reentrancy_guard_start();
+            self.assert_not_paused();
+            let verifier = IVerifierDispatcher { contract_address: self.verifier_address.read() };
+            let public_inputs_span = self.serialize_exit_public_inputs(public_inputs);
+            let valid = verifier.verify_proof(proof, public_inputs_span);
+            assert(valid, 'Invalid proof');
+            assert(public_inputs.merkle_root == self.merkle_root.read(), 'Stale proof: merkle root mismatch');
+            assert(public_inputs.health_factor > 150, 'Health factor must be > 150 for emergency exit');
+            let total_deposited = self.total_deposited.read();
+            assert(total_deposited > 0, 'No deposits');
+            let vesu_pool = IVesuPoolDispatcher { contract_address: self.vesu_pool_address.read() };
+            let vault_collateral = vesu_pool.get_total_collateral(self.wbtc_address.read());
+            let user_share = (public_inputs.user_deposit * vault_collateral) / total_deposited;
+            let exit_fee = (user_share * 2) / 100;
+            let withdraw_amount = user_share - exit_fee;
+            vesu_pool.withdraw(self.wbtc_address.read(), withdraw_amount);
+            let wbtc = IERC20Dispatcher { contract_address: self.wbtc_address.read() };
+            wbtc.transfer(get_caller_address(), withdraw_amount);
+            self.total_deposited.write(self.total_deposited.read() - user_share);
+            self.commitment_count.write(self.commitment_count.read() - 1);
+            self.emit(EmergencyExit {
+                user: get_caller_address(),
+                commitment: public_inputs.commitment,
+                amount: withdraw_amount,
+                fee: exit_fee,
+                timestamp: get_block_timestamp()
+            });
+            self.reentrancy_guard_end();
+            true
+        }
     }
 
     /// Insert a leaf into the Merkle tree and return (new root, leaf index).
@@ -257,227 +444,12 @@ mod Vault {
 
     /// Check if contract is paused
     fn assert_not_paused(self: @ContractState) {
-        assert(!self.paused.read(), "Contract is paused");
-    }
-
-    /// Get current Merkle root
-    #[view]
-    fn get_merkle_root(self: @ContractState) -> felt252 {
-        self.merkle_root.read()
-    }
-
-    /// Get Merkle proof for a leaf index (path hashes and sibling positions 0=left, 1=right).
-    #[view]
-    fn get_merkle_proof(self: @ContractState, leaf_index: u64) -> (Array<felt252>, Array<u64>) {
-        let mut path = ArrayTrait::new();
-        let mut indices = ArrayTrait::new();
-        let mut current_index = leaf_index;
-
-        for level in 0..TREE_DEPTH {
-            let sibling_index = if current_index % 2 == 0 {
-                current_index + 1
-            } else {
-                current_index - 1
-            };
-
-            let sibling = self.merkle_levels.read((level, sibling_index));
-            let zero_val = self.merkle_zero_values.read(level);
-            let sibling_hash = if sibling == 0 { zero_val } else { sibling };
-            path.append(sibling_hash);
-
-            // 0 = current is left, 1 = current is right
-            indices.append(current_index % 2);
-
-            current_index = current_index / 2;
-        }
-
-        (path, indices)
-    }
-
-    /// Get next leaf index (number of leaves inserted so far).
-    #[view]
-    fn get_merkle_next_index(self: @ContractState) -> u64 {
-        self.merkle_next_index.read()
-    }
-
-    /// Get total deposited amount
-    #[view]
-    fn get_total_deposited(self: @ContractState) -> u256 {
-        self.total_deposited.read()
-    }
-
-    /// Get total borrowed amount
-    #[view]
-    fn get_total_borrowed(self: @ContractState) -> u256 {
-        self.total_borrowed.read()
-    }
-
-    /// Get commitment count
-    #[view]
-    fn get_commitment_count(self: @ContractState) -> u64 {
-        self.commitment_count.read()
-    }
-
-    /// Pause contract operations (admin only)
-    #[external(v0)]
-    fn pause(ref self: ContractState) {
-        self.assert_only_owner();
-        self.paused.write(true);
-        self.emit(Paused { account: get_caller_address() });
-    }
-
-    /// Resume contract operations (admin only)
-    #[external(v0)]
-    fn resume(ref self: ContractState) {
-        self.assert_only_owner();
-        self.paused.write(false);
-        self.emit(Unpaused { account: get_caller_address() });
+        assert(!self.paused.read(), 'Contract is paused');
     }
 
     /// Check if caller is owner
     fn assert_only_owner(self: @ContractState) {
-        assert(get_caller_address() == self.owner.read(), "Not authorized");
-    }
-
-    /// Set minimum health factor (admin only)
-    #[external(v0)]
-    fn set_min_health_factor(ref self: ContractState, new_min: u256) {
-        self.assert_only_owner();
-        assert(new_min >= 100, "Health factor must be at least 100 (1.0)");
-        self.min_health_factor.write(new_min);
-    }
-
-    /// Set buffer percentage (admin only)
-    #[external(v0)]
-    fn set_buffer_percentage(ref self: ContractState, new_buffer: u256) {
-        self.assert_only_owner();
-        assert(new_buffer >= 100, "Buffer must be at least 100%");
-        self.buffer_percentage.write(new_buffer);
-    }
-
-    /// Borrow USDC using a zero-knowledge proof
-    /// 
-    /// # Arguments
-    /// * `proof` - Serialized ZK proof
-    /// * `public_inputs` - Public inputs for proof verification
-    /// * `recipient` - Address to receive borrowed USDC
-    ///
-    /// # Returns
-    /// * `bool` - True if borrow succeeded
-    ///
-    /// # Panics
-    /// * If proof verification fails
-    /// * If nullifier already used
-    /// * If aggregate health factor too low
-    /// * If contract is paused
-    #[external(v0)]
-    fn borrow(
-        ref self: ContractState,
-        proof: Span<felt252>,
-        public_inputs: BorrowPublicInputs,
-        recipient: ContractAddress
-    ) -> bool {
-        self.reentrancy_guard_start();
-        self.assert_not_paused();
-        
-        // Verify proof
-        let verifier = IVerifierDispatcher { contract_address: self.verifier_address.read() };
-        let public_inputs_span = self.serialize_public_inputs(public_inputs);
-        let valid = verifier.verify_proof(proof, public_inputs_span);
-        assert(valid, "Invalid proof");
-        
-        // Check merkle root matches current root
-        assert(
-            public_inputs.merkle_root == self.merkle_root.read(),
-            "Stale proof: merkle root mismatch"
-        );
-        
-        // Check nullifier not used
-        assert(
-            !self.nullifiers.read(public_inputs.nullifier),
-            "Nullifier already used"
-        );
-        
-        // Mark nullifier as used
-        self.nullifiers.write(public_inputs.nullifier, true);
-        
-        // Calculate aggregate health factor after borrow
-        let (collateral_usd, debt_usd, current_health) = self.get_aggregate_health_factor();
-        let new_debt = debt_usd + public_inputs.borrow_amount;
-        
-        // Calculate new health factor
-        assert(new_debt > 0, "Debt cannot be zero");
-        let new_health = (collateral_usd * 100) / new_debt;
-        
-        // Require new health >= (min_health * buffer_percentage / 100)
-        let min_required = (self.min_health_factor.read() * self.buffer_percentage.read()) / 100;
-        assert(new_health >= min_required, "Health factor too low after borrow");
-        
-        // Borrow USDC from Vesu pool
-        let vesu_pool = IVesuPoolDispatcher { contract_address: self.vesu_pool_address.read() };
-        vesu_pool.borrow(self.usdc_address.read(), public_inputs.borrow_amount);
-        
-        // Transfer USDC to recipient
-        let usdc = IERC20Dispatcher { contract_address: self.usdc_address.read() };
-        usdc.transfer(recipient, public_inputs.borrow_amount);
-        
-        // Update state
-        self.total_borrowed.write(self.total_borrowed.read() + public_inputs.borrow_amount);
-        
-        // Emit event
-        self.emit(Borrow {
-            user: get_caller_address(),
-            nullifier: public_inputs.nullifier,
-            borrow_amount: public_inputs.borrow_amount,
-            recipient,
-            timestamp: get_block_timestamp()
-        });
-
-        self.reentrancy_guard_end();
-        true
-    }
-
-    /// Get aggregate health factor (public view)
-    /// Returns (collateral_usd, debt_usd, health_factor)
-    /// Health factor is returned as integer (e.g., 150 = 1.50)
-    #[view]
-    fn get_aggregate_health_factor(
-        self: @ContractState
-    ) -> (u256, u256, u256) {
-        let vesu_pool = IVesuPoolDispatcher { contract_address: self.vesu_pool_address.read() };
-        
-        // Get vault's collateral and debt from Vesu
-        let collateral_btc = vesu_pool.get_total_collateral(self.wbtc_address.read());
-        let debt_usdc = vesu_pool.get_total_debt(self.usdc_address.read());
-        
-        // Get prices from oracle
-        let oracle = IPragmaOracleDispatcher { contract_address: self.oracle_address.read() };
-        
-        // Get BTC price (6 decimals)
-        let btc_price_response = oracle.get_data_median(0x4254432f555344); // "BTC/USD"
-        let btc_price = btc_price_response.price;
-        
-        // USDC price is 1 (6 decimals)
-        let usdc_price = 1000000; // 1 * 10^6
-        
-        // Calculate USD values
-        // collateral_btc has 8 decimals, btc_price has 6 decimals
-        // Result should have 6 decimals: (collateral_btc * btc_price) / 10^8
-        let collateral_usd = (collateral_btc * btc_price) / 100000000;
-        
-        // debt_usdc has 6 decimals, usdc_price has 6 decimals
-        // Result has 6 decimals: (debt_usdc * usdc_price) / 10^6
-        let debt_usd = (debt_usdc * usdc_price) / 1000000;
-        
-        // Calculate health factor: (collateral_usd / debt_usd) * 100
-        // Returns as integer (e.g., 150 = 1.50)
-        let health_factor = if debt_usd > 0 {
-            (collateral_usd * 100) / debt_usd
-        } else {
-            0
-        };
-        
-        (collateral_usd, debt_usd, health_factor)
+        assert(get_caller_address() == self.owner.read(), 'Not authorized');
     }
 
     /// Serialize public inputs for verifier
@@ -496,71 +468,6 @@ mod Vault {
         serialized.span()
     }
 
-    /// Emergency exit for healthy positions
-    /// Allows users with health factor > 150 (1.5x) to exit
-    /// Charges 2% exit fee
-    #[external(v0)]
-    fn emergency_exit(
-        ref self: ContractState,
-        proof: Span<felt252>,
-        public_inputs: ExitPublicInputs
-    ) -> bool {
-        self.reentrancy_guard_start();
-        self.assert_not_paused();
-
-        // Verify proof shows health_factor > 150
-        let verifier = IVerifierDispatcher { contract_address: self.verifier_address.read() };
-        let public_inputs_span = self.serialize_exit_public_inputs(public_inputs);
-        let valid = verifier.verify_proof(proof, public_inputs_span);
-        assert(valid, "Invalid proof");
-        
-        // Check merkle root matches
-        assert(
-            public_inputs.merkle_root == self.merkle_root.read(),
-            "Stale proof: merkle root mismatch"
-        );
-        
-        // Verify health factor > 150 (1.5x)
-        assert(public_inputs.health_factor > 150, "Health factor must be > 150 for emergency exit");
-        
-        // Calculate proportional share
-        let total_deposited = self.total_deposited.read();
-        assert(total_deposited > 0, "No deposits");
-        
-        // User's share = (user_deposit / total_deposited) * vault_balance
-        let vesu_pool = IVesuPoolDispatcher { contract_address: self.vesu_pool_address.read() };
-        let vault_collateral = vesu_pool.get_total_collateral(self.wbtc_address.read());
-        
-        let user_share = (public_inputs.user_deposit * vault_collateral) / total_deposited;
-        
-        // Calculate 2% exit fee
-        let exit_fee = (user_share * 2) / 100;
-        let withdraw_amount = user_share - exit_fee;
-        
-        // Withdraw from Vesu
-        vesu_pool.withdraw(self.wbtc_address.read(), withdraw_amount);
-        
-        // Transfer to user
-        let wbtc = IERC20Dispatcher { contract_address: self.wbtc_address.read() };
-        wbtc.transfer(get_caller_address(), withdraw_amount);
-        
-        // Update state
-        self.total_deposited.write(self.total_deposited.read() - user_share);
-        self.commitment_count.write(self.commitment_count.read() - 1);
-        
-        // Emit event
-        self.emit(EmergencyExit {
-            user: get_caller_address(),
-            commitment: public_inputs.commitment,
-            amount: withdraw_amount,
-            fee: exit_fee,
-            timestamp: get_block_timestamp()
-        });
-
-        self.reentrancy_guard_end();
-        true
-    }
-
     /// Serialize exit public inputs for verifier
     fn serialize_exit_public_inputs(
         self: @ContractState,
@@ -574,24 +481,4 @@ mod Vault {
         ];
         serialized.span()
     }
-}
-
-/// Public inputs for exit proof
-#[derive(Drop, Serde, starknet::Store)]
-struct ExitPublicInputs {
-    merkle_root: felt252,
-    commitment: felt252,
-    user_deposit: u256,
-    health_factor: u256,
-}
-
-/// Public inputs for borrow proof
-#[derive(Drop, Serde, starknet::Store)]
-struct BorrowPublicInputs {
-    merkle_root: felt252,
-    borrow_amount: u256,
-    btc_price: u256,
-    usdc_price: u256,
-    min_health_factor: u256,
-    nullifier: felt252,
 }

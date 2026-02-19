@@ -2,7 +2,7 @@ use starknet::ContractAddress;
 
 /// ERC20 token interface
 #[starknet::interface]
-trait IERC20<TContractState> {
+pub trait IERC20<TContractState> {
     fn transfer(ref self: TContractState, recipient: ContractAddress, amount: u256) -> bool;
     fn transfer_from(
         ref self: TContractState,
@@ -21,7 +21,7 @@ trait IERC20<TContractState> {
 
 /// Vesu pool interface for lending operations
 #[starknet::interface]
-trait IVesuPool<TContractState> {
+pub trait IVesuPool<TContractState> {
     fn supply(
         ref self: TContractState,
         asset: ContractAddress,
@@ -64,7 +64,7 @@ trait IVesuPool<TContractState> {
 
 /// Pragma oracle interface for price feeds
 #[starknet::interface]
-trait IPragmaOracle<TContractState> {
+pub trait IPragmaOracle<TContractState> {
     fn get_data_median(
         self: @TContractState,
         data_type: felt252
@@ -72,7 +72,7 @@ trait IPragmaOracle<TContractState> {
 }
 
 #[derive(Drop, Serde, starknet::Store)]
-struct PragmaPricesResponse {
+pub struct PragmaPricesResponse {
     price: u256,
     decimals: u8,
     last_updated_timestamp: u64,
@@ -80,7 +80,7 @@ struct PragmaPricesResponse {
 
 /// Verifier interface for ZK proof verification
 #[starknet::interface]
-trait IVerifier<TContractState> {
+pub trait IVerifier<TContractState> {
     fn verify_proof(
         self: @TContractState,
         proof: Span<felt252>,
@@ -90,7 +90,7 @@ trait IVerifier<TContractState> {
 
 /// Merkle tree interface
 #[starknet::interface]
-trait IMerkleTree<TContractState> {
+pub trait IMerkleTree<TContractState> {
     fn insert(ref self: TContractState, leaf: felt252) -> felt252;
     fn get_root(self: @TContractState) -> felt252;
     fn get_proof(self: @TContractState, index: u64) -> Array<felt252>;

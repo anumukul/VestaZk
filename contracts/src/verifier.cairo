@@ -1,22 +1,26 @@
-// Stub verifier for VestaZk borrow proof.
-// Replace this with the Garaga-generated verifier by running:
-//   cd circuits/borrow_proof && nargo compile && bb write_vk ...
-//   garaga gen --system ultra_keccak_honk --vk <path> --output ../../contracts/src/verifier.cairo
+// Verifier adapter: forwards IVerifier::verify_proof to Garaga Honk verifier.
 
+use core::result::ResultTrait;
+use starknet::ContractAddress;
 use vestazk_vault::interfaces::IVerifier;
+use vestazk_verifier::honk_verifier::IUltraKeccakZKHonkVerifierDispatcher;
+use vestazk_verifier::honk_verifier::IUltraKeccakZKHonkVerifierDispatcherTrait;
 
 #[starknet::contract]
 mod Verifier {
-    use starknet::ContractAddress;
+    use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
+    use super::{ContractAddress, IVerifier, IUltraKeccakZKHonkVerifierDispatcher, IUltraKeccakZKHonkVerifierDispatcherTrait, ResultTrait};
 
     #[storage]
-    struct Storage {}
+    struct Storage {
+        honk_verifier_address: ContractAddress,
+    }
 
     #[constructor]
-    fn constructor(ref self: ContractState) {}
+    fn constructor(ref self: ContractState, honk_verifier_address: ContractAddress) {
+        self.honk_verifier_address.write(honk_verifier_address);
+    }
 
-    /// Verifies a ZK proof. Stub implementation always returns true.
-    /// Replace this contract with Garaga-generated verifier for production.
     #[abi(embed_v0)]
     impl VerifierImpl of IVerifier<ContractState> {
         fn verify_proof(
@@ -24,7 +28,11 @@ mod Verifier {
             proof: Span<felt252>,
             public_inputs: Span<felt252>
         ) -> bool {
-            true
+            let honk = IUltraKeccakZKHonkVerifierDispatcher {
+                contract_address: self.honk_verifier_address.read()
+            };
+            let result = honk.verify_ultra_keccak_zk_honk_proof(proof);
+            result.is_ok()
         }
     }
 }

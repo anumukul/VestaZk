@@ -4,14 +4,13 @@ version = "0.1.0"
 edition = "2024_07"
 
 [dependencies]
-starknet = ">=2.6.3"
-openzeppelin = { git = "https://github.com/OpenZeppelin/cairo-contracts.git", tag = "v0.14.0" }
-poseidon = { git = "https://github.com/starkware-libs/cairo-lang.git", tag = "v2.6.3" }
+starknet = "2.14.0"
+vestazk_verifier = { path = "../circuits/borrow_proof/vestazk_verifier" }
 
 [[target.starknet-contract]]
 sierra = true
 casm = true
-casm-version = "2.6.3"
+casm-version = "2.14.0"
 
 [dev-dependencies]
-snforge_std = { git = "https://github.com/foundry-rs/starknet-foundry.git", tag = "v1.3.0" }
+# snforge_std = { git = "https://github.com/foundry-rs/starknet-foundry.git", tag = "v1.3.0" }

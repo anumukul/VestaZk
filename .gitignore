@@ -45,8 +45,10 @@ deployments/sepolia.json
 circuits/**/target/
 circuits/**/Prover.toml
 
-# Garaga
+# Garaga / Python venvs
 garaga-env/
+.venv-garaga/
+.venv-garagasource/
 *.vk
 
 # Next.js

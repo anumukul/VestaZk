@@ -25,7 +25,7 @@ The system consists of:
 1. **Frontend (Next.js)**: User interface for deposits, borrows, and dashboard
 2. **Vault Contract (Cairo)**: Main contract managing commitments and verifying proofs
 3. **ZK Circuit (Noir)**: Generates proofs for private borrowing
-4. **Verifier Contract (Garaga)**: Verifies proofs on-chain
+4. **Verifier Contract**: On-chain proof verification. A **Garaga-generated** UltraKeccak ZK Honk verifier is used; an adapter contract implements `IVerifier` and forwards to it. The proof passed to `borrow()` must be the **full_proof_with_hints** blob (from `garaga calldata`), not raw bb output.
 5. **Vesu Pool**: Handles actual lending operations
 6. **Oracle**: Provides price feeds for health factor calculations
 
