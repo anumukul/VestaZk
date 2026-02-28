@@ -2,7 +2,7 @@
   "network": "sepolia",
   "rpc_url": "https://starknet-sepolia.g.alchemy.com/starknet/version/rpc/v0_10/cf52O0RwFy1mEB0uoYsel",
   "deployer_account": "0x771d5e7e86ab8324bb10c46e2d0d5a4c1876fe5154b84d46bef3550a9eb8e95",
-  "last_updated": "2025-12-01T04:40:00Z",
+  "last_updated": "2026-02-28T00:00:00Z",
   "contracts": {
     "UltraKeccakHonkVerifier": {
       "class_hash": "0x0452c8c1056191135eda331133447090237687dbc1526db2c54175cbd7506d4",
@@ -17,11 +17,34 @@
       "declaration_tx": "0x055f21b6b382f00d1f5b028fc16317de0571c421e7ee03a8533ca2b2e8a1d47d",
       "deployment_tx": "0x048a87e408dd2153a1c092a1fb163b1aad698d0cefc8e942de4456a4ba383ced",
       "artifact": "donation_badge_verifier/target/release/donation_badge_verifier_DonationBadge.compiled_contract_class.json"
+    },
+    "VesuVault": {
+      "class_hash": "",
+      "address": "",
+      "declaration_tx": "",
+      "deployment_tx": "",
+      "artifact": "contracts/target/release/vesu_vault_VesuVault.compiled_contract_class.json",
+      "note": "To be deployed - WBTC: 0x..., USDC: 0x..., VesuPool: 0x..."
+    },
+    "LendingProofVerifier": {
+      "class_hash": "",
+      "address": "",
+      "declaration_tx": "",
+      "deployment_tx": "",
+      "artifact": "zk-badges/lending_proof/target/release/lending_proof_LendingProofVerifier.compiled_contract_class.json",
+      "note": "To be generated in Phase 3"
     }
   },
+  "external_contracts": {
+    "WBTC": "0x",
+    "USDC": "0x",
+    "VesuPool": "0x",
+    "PragmaOracle": "0x2a85bd616f912537c50a49a4076db02c00b29b2cdc8a197ce92ed1837fa875b"
+  },
   "notes": [
-    "Compiled with Scarb 2.9.2 / Cairo 2.5.x using Garaga v0.15.5 verifier outputs.",
-    "Proof calldata generated with Noir 1.0.0-beta.1 + Barretenberg 0.67.0."
+    "VesuVault contract compiled with Scarb 2.15.2 / Cairo 2.15.0",
+    "Proof calldata generated with Noir 1.0.0-beta.1 + Barretenberg 0.67.0",
+    "Vesu integration pending - need to deploy to devnet first"
   ]
 }
 
