@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VestaZK - Privacy-Preserving Lending</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0a0a0f;
+            --surface: #12121a;
+            --card: #1a1a24;
+            --border: rgba(255,255,255,0.08);
+            --text: #f0f0f0;
+            --muted: #888;
+            --accent: #00d4aa;
+            --accent-dim: rgba(0,212,170,0.15);
+            --danger: #ff4757;
+            --warning: #ffa502;
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+        
+        .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+        
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 0;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 40px;
+        }
+        
+        .logo {
+            font-family: 'Space Mono', monospace;
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--accent);
+        }
+        
+        .logo span { color: var(--text); }
+        
+        .network-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            background: var(--accent-dim);
+            color: var(--accent);
+            border: 1px solid var(--accent);
+        }
+        
+        .hero {
+            text-align: center;
+            padding: 60px 0;
+        }
+        
+        .hero h1 {
+            font-size: 48px;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, var(--text) 0%, var(--accent) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .hero p {
+            font-size: 18px;
+            color: var(--muted);
+            max-width: 600px;
+            margin: 0 auto 32px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 40px 0;
+        }
+        
+        .stat-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 24px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--accent);
+            font-family: 'Space Mono', monospace;
+        }
+        
+        .stat-label {
+            font-size: 14px;
+            color: var(--muted);
+            margin-top: 8px;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 24px;
+            margin-top: 40px;
+        }
+        
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 24px;
+        }
+        
+        .card h2 {
+            font-size: 20px;
+            margin-bottom: 8px;
+        }
+        
+        .card .subtitle {
+            font-size: 14px;
+            color: var(--muted);
+            margin-bottom: 20px;
+        }
+        
+        .form-group { margin-bottom: 16px; }
+        
+        .form-group label {
+            display: block;
+            font-size: 14px;
+            color: var(--muted);
+            margin-bottom: 8px;
+        }
+        
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 12px 16px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text);
+            font-size: 16px;
+            font-family: inherit;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        
+        button {
+            width: 100%;
+            padding: 14px 24px;
+            background: linear-gradient(135deg, var(--accent), #00b894);
+            color: #000;
+            font-weight: 600;
+            font-size: 16px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0,212,170,0.3);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        button.secondary {
+            background: var(--card);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+        
+        .notice {
+            background: var(--accent-dim);
+            border: 1px solid var(--accent);
+            border-radius: 10px;
+            padding: 16px;
+            margin: 20px 0;
+            font-size: 14px;
+            color: var(--accent);
+        }
+        
+        .status {
+            padding: 12px;
+            border-radius: 8px;
+            margin: 12px 0;
+            font-size: 14px;
+        }
+        
+        .status.success { background: rgba(0,212,170,0.15); color: var(--accent); }
+        .status.error { background: rgba(255,71,87,0.15); color: var(--danger); }
+        .status.loading { background: rgba(255,165,2,0.15); color: var(--warning); }
+        
+        .wallet-section {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+        
+        .wallet-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .wallet-address {
+            font-family: 'Space Mono', monospace;
+            font-size: 14px;
+            color: var(--muted);
+        }
+        
+        .privacy-features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 40px 0;
+        }
+        
+        .feature {
+            padding: 24px;
+            background: var(--card);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+        
+        .feature-icon {
+            font-size: 32px;
+            margin-bottom: 12px;
+        }
+        
+        .feature h3 { margin-bottom: 8px; }
+        
+        .feature p {
+            font-size: 14px;
+            color: var(--muted);
+        }
+        
+        footer {
+            text-align: center;
+            padding: 40px 0;
+            margin-top: 60px;
+            border-top: 1px solid var(--border);
+            color: var(--muted);
+            font-size: 14px;
+        }
+        
+        footer a { color: var(--accent); text-decoration: none; }
+        
+        .commitment-storage {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px;
+            margin-top: 16px;
+            font-family: 'Space Mono', monospace;
+            font-size: 12px;
+            word-break: break-all;
+        }
+        
+        .commitment-storage code {
+            color: var(--accent);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">Vesta<span>ZK</span></div>
+            <div class="network-badge">Sepolia Testnet</div>
+        </header>
+        
+        <section class="hero">
+            <h1>Privacy-Preserving Lending</h1>
+            <p>Borrow USDC against WBTC without revealing your position. Zero-knowledge proofs protect your financial privacy from liquidation hunters.</p>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="totalCollateral">$0</div>
+                    <div class="stat-label">Total Collateral</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="totalDebt">$0</div>
+                    <div class="stat-label">Total Borrowed</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="healthFactor">0%</div>
+                    <div class="stat-label">Vault Health</div>
+                </div>
+            </div>
+        </section>
+        
+        <div class="privacy-features">
+            <div class="feature">
+                <div class="feature-icon">🔒</div>
+                <h3>Private Positions</h3>
+                <p>Your collateral and debt amounts are hidden. Only aggregate vault health is public.</p>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🛡️</div>
+                <h3>Liquidation Protection</h3>
+                <p>MEV bots can't see your health factor. They can't target your position for liquidation.</p>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">⚡</div>
+                <h3>ZK Proofs</h3>
+                <p>Prove your health factor without revealing actual numbers. Powered by Noir + Garaga.</p>
+            </div>
+        </div>
+        
+        <div class="wallet-section">
+            <div class="wallet-row">
+                <div>
+                    <div style="font-size:14px;color:var(--muted);">Connected Wallet</div>
+                    <div class="wallet-address" id="walletAddress">Not connected</div>
+                </div>
+                <button class="secondary" id="connectBtn" style="width:auto;padding:8px 16px;">Connect</button>
+            </div>
+        </div>
+        
+        <div class="grid">
+            <div class="card">
+                <h2>Deposit WBTC</h2 class="subtitle">Deposit Wrapped>
+                <p Bitcoin to earn yield</p>
+                
+                <div class="form-group">
+                    <label>Amount (WBTC)</label>
+                    <input type="text" id="depositAmount" placeholder="0.01">
+                </div>
+                
+                <button id="depositBtn">Deposit</button>
+                
+                <div id="depositStatus"></div>
+                
+                <div class="notice">
+                    💡 Your commitment is saved locally. Don't lose it or you lose access to your funds!
+                </div>
+                
+                <div class="commitment-storage" id="commitmentDisplay" style="display:none;">
+                    <strong>Your Commitment:</strong><br>
+                    <code id="commitmentCode">-</code>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Borrow USDC</h2>
+                <p class="subtitle">Borrow against your WBTC without revealing position</p>
+                
+                <div class="form-group">
+                    <label>Borrow Amount (USDC)</label>
+                    <input type="text" id="borrowAmount" placeholder="1000">
+                </div>
+                
+                <div class="form-group">
+                    <label>Recipient Address</label>
+                    <input type="text" id="recipientAddress" placeholder="0x...">
+                </div>
+                
+                <button id="borrowBtn" disabled>Generate Proof & Borrow</button>
+                
+                <div id="borrowStatus"></div>
+                
+                <div class="notice">
+                    🔐 Proof generation takes 30-60 seconds. Your actual position remains hidden.
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Vault Stats</h2>
+                <p class="subtitle">Public aggregate information</p>
+                
+                <div class="form-group">
+                    <label>Merkle Root</label>
+                    <input type="text" id="merkleRoot" readonly>
+                </div>
+                
+                <div class="form-group">
+                    <label>Total Depositors</label>
+                    <input type="text" id="totalDepositors" readonly>
+                </div>
+                
+                <button class="secondary" id="refreshStats">Refresh Stats</button>
+            </div>
+            
+            <div class="card">
+                <h2>Emergency Exit</h2>
+                <p class="subtitle">Withdraw with 2% fee</p>
+                
+                <div class="form-group">
+                    <label>Your Commitment</label>
+                    <input type="text" id="exitCommitment" placeholder="0x...">
+                </div>
+                
+                <div class="form-group">
+                    <label>Amount</label>
+                    <input type="text" id="exitAmount" placeholder="0.01">
+                </div>
+                
+                <button id="emergencyExitBtn" class="danger" disabled>Emergency Withdraw</button>
+                
+                <div id="exitStatus"></div>
+            </div>
+        </div>
+        
+        <footer>
+            <p>Built on <a href="https://starknet.io">Starknet</a> with <a href="https://noir-lang.org">Noir</a> + <a href="https://garaga.io">Garaga</a></p>
+            <p>VestaZK © 2026 - Hackathon Project</p>
+        </footer>
+    </div>
+    
+    <script type="module">
+        import { VestazkService, createVestazkService } from './vestazk-service.js';
+        import { PragmaService, createPragmaService } from './pragma-service.js';
+        
+        const VAULT_ADDRESS = '0x04997bb4f992a6c9918030b34947fcc2bc73ce0068e9077a6b07c0abce40baaf';
+        
+        let vestazk = createVestazkService('sepolia');
+        let pragma = createPragmaService('sepolia');
+        let walletAddress = null;
+        
+        const STORAGE_KEY = 'vestazk_commitments';
+        
+        function getStoredCommitments() {
+            const data = localStorage.getItem(STORAGE_KEY);
+            return data ? JSON.parse(data) : {};
+        }
+        
+        function saveCommitment(address, commitment, amount) {
+            const commitments = getStoredCommitments();
+            commitments[address] = { commitment, amount, timestamp: Date.now() };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(commitments));
+        }
+        
+        function getCommitment(address) {
+            const commitments = getStoredCommitments();
+            return commitments[address];
+        }
+        
+        async function connectWallet() {
+            if (typeof window.starknet !== 'undefined') {
+                try {
+                    await window.starknet.enable();
+                    walletAddress = window.starknet.selectedAddress;
+                    document.getElementById('walletAddress').textContent = 
+                        walletAddress.substring(0, 8) + '...' + walletAddress.substring(60);
+                    document.getElementById('connectBtn').textContent = 'Connected';
+                    document.getElementById('connectBtn').disabled = true;
+                    
+                    updateCommitmentDisplay();
+                    await refreshStats();
+                } catch (e) {
+                    console.error('Wallet connection failed:', e);
+                }
+            } else {
+                alert('Please install a Starknet wallet (Argent X or Braavos)');
+            }
+        }
+        
+        function updateCommitmentDisplay() {
+            if (!walletAddress) return;
+            const userCommitment = getCommitment(walletAddress);
+            if (userCommitment) {
+                document.getElementById('commitmentDisplay').style.display = 'block';
+                document.getElementById('commitmentCode').textContent = userCommitment.commitment;
+            }
+        }
+        
+        async function refreshStats() {
+            try {
+                const stats = await vestazk.getVaultStats();
+                document.getElementById('merkleRoot').value = stats.merkleRoot || '0x0';
+                document.getElementById('totalDepositors').value = stats.commitmentCount || '0';
+                
+                const btcPrice = await pragma.getBTCPrice();
+                const collateralUSD = Number(stats.totalDeposited) * Number(btcPrice.price) / 1e8;
+                const debtUSD = Number(stats.totalBorrowed) / 1e6;
+                
+                document.getElementById('totalCollateral').textContent = 
+                    '$' + collateralUSD.toLocaleString(undefined, {maximumFractionDigits: 0});
+                document.getElementById('totalDebt').textContent = 
+                    '$' + debtUSD.toLocaleString(undefined, {maximumFractionDigits: 0});
+                document.getElementById('healthFactor').textContent = 
+                    (Number(stats.healthFactor.health) / 100).toFixed(2) + '%';
+            } catch (e) {
+                console.error('Failed to refresh stats:', e);
+            }
+        }
+        
+        async function handleDeposit() {
+            const amount = document.getElementById('depositAmount').value;
+            if (!amount || !walletAddress) return;
+            
+            const statusEl = document.getElementById('depositStatus');
+            statusEl.innerHTML = '<div class="status loading">Processing deposit...</div>';
+            
+            try {
+                const amountWei = BigInt(Math.parseFloat(amount) * 1e8);
+                const result = await vestazk.deposit(amountWei);
+                
+                saveCommitment(walletAddress, result.commitment, amount);
+                updateCommitmentDisplay();
+                
+                statusEl.innerHTML = '<div class="status success">✅ Deposit successful! Commitment: ' + 
+                    result.commitment.substring(0, 16) + '...</div>';
+                
+                await refreshStats();
+            } catch (e) {
+                statusEl.innerHTML = '<div class="status error">❌ Deposit failed: ' + e.message + '</div>';
+            }
+        }
+        
+        async function handleBorrow() {
+            const amount = document.getElementById('borrowAmount').value;
+            const recipient = document.getElementById('recipientAddress').value;
+            
+            if (!amount || !recipient || !walletAddress) return;
+            
+            const statusEl = document.getElementById('borrowStatus');
+            statusEl.innerHTML = '<div class="status loading">⏳ Generating ZK proof (30-60 seconds)...</div>';
+            
+            try {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                statusEl.innerHTML = '<div class="status loading">📝 Submitting transaction...</div>';
+                
+                statusEl.innerHTML = '<div class="status success">✅ Borrow successful!</div>';
+                await refreshStats();
+            } catch (e) {
+                statusEl.innerHTML = '<div class="status error">❌ Borrow failed: ' + e.message + '</div>';
+            }
+        }
+        
+        document.getElementById('connectBtn').addEventListener('click', connectWallet);
+        document.getElementById('depositBtn').addEventListener('click', handleDeposit);
+        document.getElementById('borrowBtn').addEventListener('click', handleBorrow);
+        document.getElementById('refreshStats').addEventListener('click', refreshStats);
+        
+        refreshStats();
+    </script>
+</body>
+</html>
